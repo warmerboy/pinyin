@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>拼音练习</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- 背景飘动装饰层（精简到 5 个，避免渲染压力） -->
+  <div class="bg-decor" aria-hidden="true">
+    <span style="--d:0s; --x:10%; --t:18s">✨</span>
+    <span style="--d:4s; --x:30%; --t:22s">🌸</span>
+    <span style="--d:8s; --x:55%; --t:20s">⭐</span>
+    <span style="--d:2s; --x:75%; --t:24s">🌸</span>
+    <span style="--d:6s; --x:90%; --t:19s">💖</span>
+  </div>
+
+  <header class="topbar">
+    <h1 class="logo" data-nav="home">🌸 拼音练习</h1>
+    <nav class="nav">
+      <button data-nav="home">主页</button>
+      <button data-nav="settings">设置</button>
+      <button data-nav="history">历史</button>
+      <button class="sound-toggle" data-action="toggle-sound" title="声音开关">🔊</button>
+    </nav>
+  </header>
+
+  <main id="app"></main>
+
+  <!-- 全屏撒花 canvas -->
+  <canvas id="celebrate-canvas" aria-hidden="true"></canvas>
+
+  <!-- 4 个视图模板 -->
+  <template id="view-home">
+    <section class="view view-home">
+      <div class="home-hero">
+        <div class="mascot-host home-mascot"></div>
+        <div class="speech-bubble">今天我们一起练拼音吧！</div>
+      </div>
+      <h2>欢迎，小朋友！</h2>
+      <p class="hint">点击下面的大按钮开始今天的拼音练习吧。</p>
+      <div class="big-buttons">
+        <button class="big-btn primary" data-action="start">🎯 开始练习</button>
+        <button class="big-btn" data-nav="settings">📝 设置已学元素</button>
+        <button class="big-btn" data-nav="history">📊 查看历史</button>
+      </div>
+      <p class="hint small" id="home-status"></p>
+    </section>
+  </template>
+
+  <template id="view-settings">
+    <section class="view view-settings">
+      <h2>设置已学的拼音元素</h2>
+      <p class="hint">勾选女儿已经学过的内容，软件会用这些来出题。</p>
+
+      <div class="group">
+        <div class="group-head">
+          <h3>声母（23）</h3>
+          <span>
+            <button class="link-btn" data-bulk="all" data-target="shengmu">全选</button>
+            <button class="link-btn" data-bulk="none" data-target="shengmu">全不选</button>
+          </span>
+        </div>
+        <div class="grid" id="grid-shengmu"></div>
+      </div>
+
+      <div class="group">
+        <div class="group-head">
+          <h3>韵母（24）</h3>
+          <span>
+            <button class="link-btn" data-bulk="all" data-target="yunmu">全选</button>
+            <button class="link-btn" data-bulk="none" data-target="yunmu">全不选</button>
+          </span>
+        </div>
+        <div class="grid" id="grid-yunmu"></div>
+      </div>
+
+      <div class="group">
+        <div class="group-head">
+          <h3>整体认读音节（16）</h3>
+          <span>
+            <button class="link-btn" data-bulk="all" data-target="zhengti">全选</button>
+            <button class="link-btn" data-bulk="none" data-target="zhengti">全不选</button>
+          </span>
+        </div>
+        <div class="grid" id="grid-zhengti"></div>
+      </div>
+
+      <div class="group">
+        <h3>每组题数</h3>
+        <input type="number" id="qps" min="1" max="50" value="10">
+        <p class="hint small">默认 10。声调（四声）会自动结合在每道题里，无需单独勾选。</p>
+      </div>
+
+      <div class="actions">
+        <button class="big-btn primary" data-action="save-settings">保存设置</button>
+        <button class="big-btn" data-nav="home">返回主页</button>
+      </div>
+    </section>
+  </template>
+
+  <template id="view-practice">
+    <section class="view view-practice">
+      <div class="practice-top">
+        <div class="star-progress" id="star-progress"></div>
+        <div class="streak-badge" id="streak-badge"></div>
+      </div>
+
+      <div class="card">
+        <div class="pinyin-display" id="pinyin-display">mā</div>
+        <button class="speak-btn" data-action="speak" title="听一下">🔊</button>
+      </div>
+
+      <div class="judge-row">
+        <button class="judge-btn ok"    data-judge="会">✅ 会</button>
+        <button class="judge-btn fuzzy" data-judge="不熟">🤔 不熟</button>
+        <button class="judge-btn no"    data-judge="不会">❌ 不会</button>
+      </div>
+
+      <div class="practice-bottom">
+        <div class="mascot-host practice-mascot"></div>
+        <button class="link-btn" data-nav="home">退出本组练习</button>
+      </div>
+    </section>
+  </template>
+
+  <template id="view-report">
+    <section class="view view-report">
+      <h2>✨ 这一组完成啦！</h2>
+
+      <div class="summary-cards">
+        <div class="sum-card ok">    <div class="num" id="cnt-ok">0</div>    <div>会</div></div>
+        <div class="sum-card fuzzy"> <div class="num" id="cnt-fuzzy">0</div> <div>不熟</div></div>
+        <div class="sum-card no">    <div class="num" id="cnt-no">0</div>    <div>不会</div></div>
+      </div>
+
+      <div class="report-block">
+        <h3>本次需要重点练的（不熟 / 不会）</h3>
+        <div id="weak-list" class="chip-list"></div>
+      </div>
+
+      <div class="report-block">
+        <h3>本次表现好的（会）</h3>
+        <div id="ok-list" class="chip-list"></div>
+      </div>
+
+      <div class="report-block">
+        <h3>累计建议</h3>
+        <p class="hint small">基于历史所有练习数据。</p>
+        <div class="advice">
+          <div><strong>薄弱声母：</strong><span id="weak-shengmu">—</span></div>
+          <div><strong>薄弱韵母：</strong><span id="weak-yunmu">—</span></div>
+          <div><strong>薄弱声调：</strong><span id="weak-tone">—</span></div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="big-btn primary" data-action="start">再来一组</button>
+        <button class="big-btn" data-nav="home">返回主页</button>
+      </div>
+    </section>
+  </template>
+
+  <template id="view-history">
+    <section class="view view-history">
+      <h2>历史累计统计</h2>
+      <p class="hint">所有练习累加，每个元素只看最近 5 次答题。</p>
+
+      <div class="report-block">
+        <h3>音节</h3>
+        <div id="hist-syllables" class="chip-list"></div>
+      </div>
+
+      <div class="report-block">
+        <h3>声母</h3>
+        <div id="hist-shengmu" class="chip-list"></div>
+      </div>
+
+      <div class="report-block">
+        <h3>韵母</h3>
+        <div id="hist-yunmu" class="chip-list"></div>
+      </div>
+
+      <div class="report-block">
+        <h3>声调</h3>
+        <div id="hist-tone" class="chip-list"></div>
+      </div>
+
+      <div class="actions">
+        <button class="big-btn" data-action="clear-history">清空历史</button>
+        <button class="big-btn" data-nav="home">返回主页</button>
+      </div>
+    </section>
+  </template>
+
+  <!-- 加载顺序：data → state → stats → generator → mascot/sounds/streak/celebrate → app -->
+  <script src="src/data.js"></script>
+  <script src="src/state.js"></script>
+  <script src="src/stats.js"></script>
+  <script src="src/generator.js"></script>
+  <script src="src/mascot.js"></script>
+  <script src="src/sounds.js"></script>
+  <script src="src/streak.js"></script>
+  <script src="src/celebrate.js"></script>
+  <script src="src/app.js"></script>
+</body>
+</html>
