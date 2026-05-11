@@ -63,13 +63,15 @@ window.App = window.App || {};
   }
 
   // 给一个 pinyin 题目（拼音 + 对应字），返回 4 个汉字选项
+  // 关键：同音字（如 地/弟 都读 dì，他/她 都读 tā）不能作为干扰项，否则会出现"两个都对"的歧义
   function charChoicesFor(targetChar, charPool) {
     const correct = targetChar;
     const distractors = [];
 
-    // 1. 同声母 / 同韵母的其他字
+    // 1. 同声母 / 同韵母的其他字（但读音必须不一样）
     const similar = charPool.filter(c =>
       c.char !== targetChar.char &&
+      c.pinyin !== targetChar.pinyin &&
       (c.shengmu === targetChar.shengmu || c.yunmu === targetChar.yunmu)
     );
     for (const c of shuffle(similar)) {
@@ -77,9 +79,10 @@ window.App = window.App || {};
       distractors.push(c);
     }
 
-    // 2. 随机其他字补足
+    // 2. 随机其他字补足（读音同样要不一样）
     const remaining = charPool.filter(c =>
       c.char !== targetChar.char &&
+      c.pinyin !== targetChar.pinyin &&
       !distractors.find(d => d.char === c.char)
     );
     for (const c of shuffle(remaining)) {

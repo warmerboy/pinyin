@@ -247,9 +247,14 @@
   function handleChoiceClick(q, opt, btn) {
     if (!attempt || attempt.locked) return;
 
-    const correctVal = q.prompt === 'char' ? q.correct : q.correct.char;
-    const chosenVal  = q.prompt === 'char' ? opt        : opt.char;
-    const isCorrect  = chosenVal === correctVal;
+    // 看字选拼音：直接比拼音字符串
+    // 看拼音选字：只要选中的字与正确字读音相同就算对（兜底处理同音字如 地/弟、他/她）
+    let isCorrect;
+    if (q.prompt === 'char') {
+      isCorrect = opt === q.correct;
+    } else {
+      isCorrect = opt.pinyin === q.correct.pinyin;
+    }
 
     if (isCorrect) {
       btn.classList.add('correct');
@@ -271,10 +276,17 @@
   }
 
   function highlightCorrect(q) {
-    const correctVal = q.prompt === 'char' ? q.correct : q.correct.char;
-    $all('#choices .choice').forEach(btn => {
-      const v = btn.dataset.value;
-      if (v === correctVal) btn.classList.add('correct');
+    // 看字选拼音：只有唯一正确拼音
+    // 看拼音选字：任何与正确字同读音的选项都算正确
+    $all('#choices .choice').forEach((btn, i) => {
+      const opt = q.options[i];
+      let optIsCorrect;
+      if (q.prompt === 'char') {
+        optIsCorrect = opt === q.correct;
+      } else {
+        optIsCorrect = opt && opt.pinyin === q.correct.pinyin;
+      }
+      if (optIsCorrect) btn.classList.add('correct');
       else btn.classList.add('disabled');
     });
   }
