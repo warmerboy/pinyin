@@ -3,7 +3,14 @@
   const App = window.App;
 
   // 当前练习会话
-  let session = null; // { questions, index, answers, prevStreakLevel }
+  // mode: 'parent'（看拼音读·家长判定）| 'complex'（综合练习·软件判分）
+  let session = null;
+
+  // 综合练习的题内状态：当前选项是否已锁定、当前步骤（仅 breakdown 用）
+  let attempt = null;
+  // attempt 结构：
+  // - 选择题：{ wrongOnce: bool, locked: bool }
+  // - breakdown：{ stepIndex: 0..2, wrongPerStep: [bool,bool,bool], stepLocked: false }
 
   function $(sel, root) { return (root || document).querySelector(sel); }
   function $all(sel, root) { return Array.from((root || document).querySelectorAll(sel)); }
@@ -15,19 +22,17 @@
     main.innerHTML = '';
     main.appendChild(tpl.content.cloneNode(true));
 
-    if (viewName === 'home')     renderHome();
-    if (viewName === 'settings') renderSettings();
-    if (viewName === 'practice') renderPractice();
-    if (viewName === 'report')   renderReport();
-    if (viewName === 'history')  renderHistory();
+    if (viewName === 'home')              renderHome();
+    if (viewName === 'settings')          renderSettings();
+    if (viewName === 'practice')          renderPractice();
+    if (viewName === 'practice-complex')  renderPracticeComplex();
+    if (viewName === 'report')            renderReport();
+    if (viewName === 'history')           renderHistory();
   }
 
-  function navigate(viewName) {
-    location.hash = '#/' + viewName;
-  }
-
+  function navigate(viewName) { location.hash = '#/' + viewName; }
   function currentView() {
-    const m = (location.hash || '').match(/^#\/(\w+)/);
+    const m = (location.hash || '').match(/^#\/([\w-]+)/);
     return m ? m[1] : 'home';
   }
 
@@ -43,10 +48,8 @@
     } else {
       status.textContent = '已勾选 ' + total + ' 个元素，每组 ' + settings.questionsPerSet + ' 题。';
     }
-
     const mascotHost = $('.home-mascot');
     if (mascotHost && App.Mascot) App.Mascot.mount(mascotHost, 'idle');
-
     refreshSoundIcon();
   }
 
@@ -73,11 +76,9 @@
       grid.appendChild(cell);
     });
   }
-
   function readGrid(sel) {
     return $all(sel + ' .cell.checked').map(c => c.dataset.value);
   }
-
   function saveSettingsFromUI() {
     const qps = parseInt($('#qps').value, 10);
     App.saveSettings({
@@ -89,38 +90,92 @@
     navigate('home');
   }
 
-  // ---- 开始练习 ----
-  function startPractice() {
-    const settings = App.getSettings();
+  // ============================================================
+  // 模式一：家长判定模式（v1.0 保留）
+  // ============================================================
+  function startParentPractice() {
+    const s = App.getSettings();
     const history = App.getHistory();
-    const questions = App.generate(
-      settings.selectedShengmu,
-      settings.selectedYunmu,
-      settings.selectedZhengti,
-      settings.questionsPerSet,
-      history
-    );
+    const questions = App.generate(s.selectedShengmu, s.selectedYunmu, s.selectedZhengti, s.questionsPerSet, history);
     if (questions.length === 0) {
       alert('当前勾选的元素拼不出任何合法音节。请到"设置"里多勾一些声母 / 韵母 / 整体认读音节。');
       navigate('settings');
       return;
     }
-    session = { questions, index: 0, answers: [], prevStreakLevel: 0 };
+    session = { mode: 'parent', questions, index: 0, answers: [] };
     if (App.Streak) App.Streak.reset();
     if (App.Sounds) { App.Sounds.init(); App.Sounds.setEnabled(!!App.getSettings().soundEnabled); }
     navigate('practice');
   }
 
-  // ---- 练习页 ----
   function renderPractice() {
-    if (!session) {
-      navigate('home');
-      return;
-    }
+    if (!session || session.mode !== 'parent') { navigate('home'); return; }
     const q = session.questions[session.index];
     $('#pinyin-display').textContent = q.pinyin;
+    renderProgressAndStreak();
+    mountPracticeMascot();
+  }
 
-    // 进度星星
+  function judge(result) {
+    if (!session || session.mode !== 'parent') return;
+    const q = session.questions[session.index];
+    App.recordAnswer(q, result, 'parent');
+    session.answers.push({ question: q, result });
+
+    if (App.Streak) App.Streak.onAnswer(result);
+    if (App.Celebrate) {
+      if (result === '会') {
+        App.Celebrate.smallCorrect();
+        if (App.Streak && App.Streak.isMilestone()) {
+          App.Celebrate.streakLevelUp(App.Streak.level(), App.Streak.get().current);
+        }
+      } else {
+        App.Celebrate.gentle(result);
+      }
+    }
+    advance();
+  }
+
+  // ============================================================
+  // 模式二：综合练习（v2 软件判分）
+  // ============================================================
+  function startComplexPractice() {
+    const s = App.getSettings();
+    const history = App.getHistory();
+    const types = s.enabledComplexTypes || ['char2pinyin','pinyin2char','breakdown'];
+    const questions = App.generateComplex(
+      s.selectedShengmu, s.selectedYunmu, s.selectedZhengti,
+      s.questionsPerSet, types, history
+    );
+    if (questions.length === 0) {
+      alert('当前勾选的拼音元素能涵盖的汉字太少（不足 4 个），无法出综合练习题。请到"设置"里多勾一些声母 / 韵母。');
+      navigate('settings');
+      return;
+    }
+    session = { mode: 'complex', questions, index: 0, answers: [] };
+    attempt = null;
+    if (App.Streak) App.Streak.reset();
+    if (App.Sounds) { App.Sounds.init(); App.Sounds.setEnabled(!!App.getSettings().soundEnabled); }
+    navigate('practice-complex');
+  }
+
+  function renderPracticeComplex() {
+    if (!session || session.mode !== 'complex') { navigate('home'); return; }
+    const q = session.questions[session.index];
+    renderProgressAndStreak();
+    mountPracticeMascot();
+
+    if (q.type === 'breakdown') {
+      attempt = { stepIndex: 0, wrongPerStep: [false, false, false], stepLocked: false };
+      renderBreakdownStep(q);
+    } else {
+      attempt = { wrongOnce: false, locked: false };
+      renderChoiceQuestion(q);
+    }
+  }
+
+  // 通用工具：进度星 + 连对
+  function renderProgressAndStreak() {
     const total = session.questions.length;
     const done = session.index;
     const stars = $('#star-progress');
@@ -133,75 +188,264 @@
         stars.appendChild(span);
       }
     }
-
-    // 连对显示
     const sb = $('#streak-badge');
     if (sb && App.Streak) {
       const cur = App.Streak.get().current;
       sb.textContent = cur >= 2 ? ('🔥 连对 ' + cur) : '';
-      if (cur >= 2) {
-        sb.classList.remove('show');
-        void sb.offsetWidth;
-        sb.classList.add('show');
-      }
+      if (cur >= 2) { sb.classList.remove('show'); void sb.offsetWidth; sb.classList.add('show'); }
     }
-
+  }
+  function mountPracticeMascot() {
     const mascotHost = $('.practice-mascot');
     if (mascotHost && App.Mascot && !mascotHost.querySelector('svg')) {
       App.Mascot.mount(mascotHost, 'idle');
     }
   }
 
-  function judge(result) {
-    if (!session) return;
-    const q = session.questions[session.index];
-    App.recordAnswer(q, result);
+  // 渲染题型 ① / ②（选择题）
+  function renderChoiceQuestion(q) {
+    const prompt = $('#prompt-area');
+    const stepHint = $('#step-hint');
+    const choicesEl = $('#choices');
+
+    stepHint.textContent = q.type === 'char2pinyin' ? '这个字读什么？' : '这个拼音是哪个字？';
+
+    if (q.prompt === 'char') {
+      const emojiHtml = q.target.emoji ? `<span class="prompt-emoji">${q.target.emoji}</span>` : '';
+      prompt.innerHTML = `<span class="prompt-char">${q.target.char}</span>${emojiHtml}`;
+    } else {
+      prompt.innerHTML = `<span class="prompt-pinyin">${q.target.pinyin}</span>`;
+    }
+
+    choicesEl.innerHTML = '';
+    q.options.forEach((opt, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'choice';
+      btn.dataset.choiceIndex = String(i);
+      if (q.prompt === 'char') {
+        // 选项是拼音
+        btn.innerHTML = `<span class="opt-pinyin">${opt}</span>`;
+        btn.dataset.value = opt;
+      } else {
+        // 选项是 char 对象
+        const e = opt.emoji ? `<span class="opt-emoji">${opt.emoji}</span>` : '';
+        btn.innerHTML = `${e}<span class="opt-text">${opt.char}</span>`;
+        btn.dataset.value = opt.char;
+      }
+      btn.addEventListener('click', () => handleChoiceClick(q, opt, btn));
+      choicesEl.appendChild(btn);
+    });
+  }
+
+  function handleChoiceClick(q, opt, btn) {
+    if (!attempt || attempt.locked) return;
+
+    const correctVal = q.prompt === 'char' ? q.correct : q.correct.char;
+    const chosenVal  = q.prompt === 'char' ? opt        : opt.char;
+    const isCorrect  = chosenVal === correctVal;
+
+    if (isCorrect) {
+      btn.classList.add('correct');
+      attempt.locked = true;
+      const result = attempt.wrongOnce ? '不熟' : '会';
+      finalizeChoice(q, result);
+    } else {
+      btn.classList.add('wrong', 'disabled');
+      if (attempt.wrongOnce) {
+        // 已经错过一次了，再错直接判"不会"，把正确答案高亮，等 1.2s 进下一题
+        attempt.locked = true;
+        highlightCorrect(q);
+        finalizeChoice(q, '不会');
+      } else {
+        // 第一次错：标红，允许再选一次
+        attempt.wrongOnce = true;
+      }
+    }
+  }
+
+  function highlightCorrect(q) {
+    const correctVal = q.prompt === 'char' ? q.correct : q.correct.char;
+    $all('#choices .choice').forEach(btn => {
+      const v = btn.dataset.value;
+      if (v === correctVal) btn.classList.add('correct');
+      else btn.classList.add('disabled');
+    });
+  }
+
+  function finalizeChoice(q, result) {
+    App.recordAnswer(q, result, 'complex');
     session.answers.push({ question: q, result });
 
     if (App.Streak) App.Streak.onAnswer(result);
-
-    // 即时庆祝
     if (App.Celebrate) {
       if (result === '会') {
         App.Celebrate.smallCorrect();
         if (App.Streak && App.Streak.isMilestone()) {
-          const lvl = App.Streak.level();
-          App.Celebrate.streakLevelUp(lvl, App.Streak.get().current);
+          App.Celebrate.streakLevelUp(App.Streak.level(), App.Streak.get().current);
         }
       } else {
         App.Celebrate.gentle(result);
       }
     }
+    // 答案显示一会儿再切下一题
+    setTimeout(advance, result === '会' ? 700 : 1200);
+  }
 
+  // 渲染题型 ③（拆分拼读，3 步走）
+  function renderBreakdownStep(q) {
+    const prompt = $('#prompt-area');
+    const stepHint = $('#step-hint');
+    const choicesEl = $('#choices');
+
+    // 顶部 prompt：始终显示字
+    const emojiHtml = q.target.emoji ? `<span class="prompt-emoji">${q.target.emoji}</span>` : '';
+    prompt.innerHTML = `<span class="prompt-char">${q.target.char}</span>${emojiHtml}`;
+
+    const bd = q.breakdown;
+
+    // 整体认读音节只有声调一步
+    if (bd.special === 'zhengti-only-tone') {
+      attempt.stepIndex = 2;
+      stepHint.textContent = '选这个字的声调';
+      renderToneOptions(q, bd.toneStep);
+      return;
+    }
+
+    if (attempt.stepIndex === 0) {
+      stepHint.textContent = '第 1 步：选声母';
+      renderSimpleOptions(q, bd.shengmuStep, 'shengmu');
+    } else if (attempt.stepIndex === 1) {
+      stepHint.textContent = '第 2 步：选韵母';
+      renderSimpleOptions(q, bd.yunmuStep, 'yunmu');
+    } else {
+      stepHint.textContent = '第 3 步：选声调';
+      renderToneOptions(q, bd.toneStep);
+    }
+    attempt.stepLocked = false;
+  }
+
+  function renderSimpleOptions(q, step, dimension) {
+    const choicesEl = $('#choices');
+    choicesEl.innerHTML = '';
+    step.options.forEach(val => {
+      const btn = document.createElement('button');
+      btn.className = 'choice';
+      btn.dataset.value = val;
+      btn.innerHTML = `<span class="opt-text">${val}</span>`;
+      btn.addEventListener('click', () => handleBreakdownClick(q, step, val, btn, dimension));
+      choicesEl.appendChild(btn);
+    });
+  }
+
+  function renderToneOptions(q, step) {
+    const choicesEl = $('#choices');
+    choicesEl.innerHTML = '';
+    const marks = { 1: 'ˉ', 2: 'ˊ', 3: 'ˇ', 4: 'ˋ' };
+    step.options.forEach(val => {
+      const btn = document.createElement('button');
+      btn.className = 'choice';
+      btn.dataset.value = String(val);
+      // 用 base 字母示意，例如对"māo"，1声示意为 ā，2声 á 等
+      const sample = makeTonePreview(q.target, val);
+      btn.innerHTML = `<span class="opt-tone-mark">${sample}</span><span class="opt-tone-num">${val} 声</span>`;
+      btn.addEventListener('click', () => handleBreakdownClick(q, step, val, btn, 'tone'));
+      choicesEl.appendChild(btn);
+    });
+  }
+
+  function makeTonePreview(target, toneNumber) {
+    // 用该字 base 应用该声调，预览给孩子看
+    const sample = App.addTone(target.base, toneNumber);
+    return sample;
+  }
+
+  function handleBreakdownClick(q, step, val, btn, dimension) {
+    if (!attempt || attempt.stepLocked) return;
+
+    const isCorrect = String(val) === String(step.correct);
+
+    if (isCorrect) {
+      btn.classList.add('correct');
+      attempt.stepLocked = true;
+      // 进入下一步或结束题目
+      setTimeout(() => goNextBreakdownStep(q), 500);
+    } else {
+      btn.classList.add('wrong', 'disabled');
+      attempt.wrongPerStep[attempt.stepIndex] = true;
+      // 拆分模式：每步只允许试 2 次（首次错→标红允许重选；第二次错→高亮正确并进入下一步）
+      const stepKey = '_secondTry_' + attempt.stepIndex;
+      if (attempt[stepKey]) {
+        // 已是第二次错
+        attempt.stepLocked = true;
+        highlightBreakdownCorrect(step);
+        setTimeout(() => goNextBreakdownStep(q), 1200);
+      } else {
+        attempt[stepKey] = true;
+      }
+    }
+  }
+
+  function highlightBreakdownCorrect(step) {
+    $all('#choices .choice').forEach(btn => {
+      if (btn.dataset.value === String(step.correct)) btn.classList.add('correct');
+      else btn.classList.add('disabled');
+    });
+  }
+
+  function goNextBreakdownStep(q) {
+    if (attempt.stepIndex < 2) {
+      attempt.stepIndex++;
+      renderBreakdownStep(q);
+    } else {
+      // 整道题完成：按"任意一步错过"算不熟，"全对"算会，"两步以上错"算不会
+      const wrongs = attempt.wrongPerStep.filter(Boolean).length;
+      const result = wrongs === 0 ? '会' : (wrongs <= 1 ? '不熟' : '不会');
+
+      App.recordAnswer(q, result, 'complex');
+      session.answers.push({ question: q, result });
+
+      if (App.Streak) App.Streak.onAnswer(result);
+      if (App.Celebrate) {
+        if (result === '会') {
+          App.Celebrate.smallCorrect();
+          if (App.Streak && App.Streak.isMilestone()) {
+            App.Celebrate.streakLevelUp(App.Streak.level(), App.Streak.get().current);
+          }
+        } else {
+          App.Celebrate.gentle(result);
+        }
+      }
+      setTimeout(advance, 700);
+    }
+  }
+
+  // 推进到下一题或结束本组
+  function advance() {
     session.index++;
     if (session.index >= session.questions.length) {
-      // 整组结束：先播庆祝再跳报告
       const sum = App.summarizeSession(session.answers);
       const total = session.answers.length;
       const score = total > 0 ? sum.ok.length / total : 0;
       const goReport = () => navigate('report');
-      if (App.Celebrate) {
-        App.Celebrate.setComplete(score, goReport);
-      } else {
-        goReport();
-      }
+      if (App.Celebrate) App.Celebrate.setComplete(score, goReport);
+      else goReport();
     } else {
-      renderPractice();
+      if (session.mode === 'parent') renderPractice();
+      else                            renderPracticeComplex();
     }
   }
 
   // ---- 报告页 ----
   function renderReport() {
-    if (!session) {
-      navigate('home');
-      return;
-    }
+    if (!session) { navigate('home'); return; }
     const sum = App.summarizeSession(session.answers);
     $('#cnt-ok').textContent    = sum.ok.length;
     $('#cnt-fuzzy').textContent = sum.fuzzy.length;
     $('#cnt-no').textContent    = sum.no.length;
 
-    const chip = (q, cls) => '<span class="chip ' + cls + '">' + q.pinyin + '</span>';
+    const chip = (q, cls) => '<span class="chip ' + cls + '">' +
+      (q.target ? (q.target.char + ' ' + q.pinyin) : q.pinyin) +
+      '</span>';
 
     const weakHtml = [...sum.no.map(q => chip(q, 'no')), ...sum.fuzzy.map(q => chip(q, 'fuzzy'))].join('');
     $('#weak-list').innerHTML = weakHtml || '<span class="empty">无</span>';
@@ -223,14 +467,12 @@
   // ---- 历史页 ----
   function renderHistory() {
     const agg = App.aggregate(App.getHistory());
-
     const levelCls = (level) => {
       if (level === App.LEVEL.REMEMBERED) return 'ok';
       if (level === App.LEVEL.FUZZY)      return 'fuzzy';
       if (level === App.LEVEL.UNKNOWN)    return 'no';
       return 'pending';
     };
-
     const renderList = (sel, list, labelFmt) => {
       const el = $(sel);
       if (!list || list.length === 0) {
@@ -246,14 +488,13 @@
         '</span>'
       ).join('');
     };
-
     renderList('#hist-syllables', agg.bySyllable.map(s => ({ key: s.pinyin, level: s.level })));
     renderList('#hist-shengmu',   agg.byShengmu);
     renderList('#hist-yunmu',     agg.byYunmu);
     renderList('#hist-tone',      agg.byTone, (x) => x.key + ' 声');
   }
 
-  // ---- TTS（拼音朗读，区别于鼓励语 TTS） ----
+  // ---- TTS（拼音朗读） ----
   function speakPinyin(text) {
     if (!('speechSynthesis' in window)) return;
     try {
@@ -274,30 +515,26 @@
     btn.title = on ? '点击静音' : '点击开启声音';
     if (App.Sounds) App.Sounds.setEnabled(on);
   }
-
   function toggleSound() {
-    const on = !App.getSettings().soundEnabled;
-    App.saveSettings({ soundEnabled: on });
+    App.saveSettings({ soundEnabled: !App.getSettings().soundEnabled });
     refreshSoundIcon();
   }
 
   // ---- 全局事件代理 ----
   document.addEventListener('click', (e) => {
-    // 设置页可勾选格子
     const cell = e.target.closest('[data-cell]');
-    if (cell) {
-      cell.classList.toggle('checked');
-      return;
-    }
+    if (cell) { cell.classList.toggle('checked'); return; }
 
     const t = e.target.closest('[data-nav], [data-action], [data-bulk], [data-judge]');
     if (!t) return;
 
-    if (t.dataset.nav) { navigate(t.dataset.nav); return; }
+    if (t.dataset.nav)   { navigate(t.dataset.nav); return; }
     if (t.dataset.judge) { judge(t.dataset.judge); return; }
 
     const action = t.dataset.action;
-    if (action === 'start') startPractice();
+    if (action === 'start')         startParentPractice();          // 兼容旧入口（如有）
+    else if (action === 'start-parent')  startParentPractice();
+    else if (action === 'start-complex') startComplexPractice();
     else if (action === 'save-settings') saveSettingsFromUI();
     else if (action === 'speak') {
       const txt = $('#pinyin-display');
@@ -314,11 +551,19 @@
     if (t.dataset.bulk) {
       const target = t.dataset.target;
       const all = t.dataset.bulk === 'all';
-      $all('#grid-' + target + ' .cell').forEach(c => {
-        c.classList.toggle('checked', all);
-      });
+      $all('#grid-' + target + ' .cell').forEach(c => c.classList.toggle('checked', all));
     }
   });
+
+  // "再来一组"按钮根据上一次的模式重启
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-action="start"]');
+    if (!t) return;
+    if (session && session.mode === 'complex') {
+      e.stopImmediatePropagation();
+      startComplexPractice();
+    }
+  }, true);
 
   window.addEventListener('hashchange', () => mount(currentView()));
   window.addEventListener('DOMContentLoaded', () => {

@@ -93,6 +93,67 @@ window.App = window.App || {};
     });
   }
 
+  // ====================================================================
+  // 综合练习题目生成（v2 升级版）
+  // 题型代码：
+  //   'char2pinyin'   看字/图选拼音
+  //   'pinyin2char'   看拼音选字/图
+  //   'breakdown'     拆分拼读：声母 → 韵母 → 声调
+  // ====================================================================
+
+  function pickRandom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  // 主入口：根据已选拼音元素 + 题型组合 + 题数生成综合练习题目
+  function generateComplex(selectedShengmu, selectedYunmu, selectedZhengti, n, enabledTypes, history) {
+    history = history || {};
+    enabledTypes = (enabledTypes && enabledTypes.length > 0)
+      ? enabledTypes
+      : ['char2pinyin', 'pinyin2char', 'breakdown'];
+
+    const charPool = App.charsForSelected(selectedShengmu, selectedYunmu, selectedZhengti);
+    if (charPool.length < 4) {
+      // 池子太小（< 4 个字），可选项凑不齐 4 个，提示家长扩大范围
+      return [];
+    }
+
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const type = pickRandom(enabledTypes);
+      const target = pickRandom(charPool);
+      const q = buildOne(type, target, charPool, selectedShengmu, selectedYunmu);
+      if (q) out.push(q);
+    }
+    return out;
+  }
+
+  function buildOne(type, targetChar, charPool, selectedShengmu, selectedYunmu) {
+    const base = {
+      type,
+      target: targetChar,                // 完整字对象
+      pinyin: targetChar.pinyin,
+      base:   targetChar.base,
+      tone:   targetChar.tone,
+      shengmu: targetChar.shengmu,
+      yunmu:   targetChar.yunmu,
+      kind:    'complex'                 // 区别于 v1 的 'syllable' / 'zhengti'
+    };
+
+    if (type === 'char2pinyin') {
+      const { options, correct } = App.pinyinChoicesFor(targetChar, charPool);
+      return { ...base, prompt: 'char', options, correct };
+    }
+    if (type === 'pinyin2char') {
+      const { options, correct } = App.charChoicesFor(targetChar, charPool);
+      return { ...base, prompt: 'pinyin', options, correct };
+    }
+    if (type === 'breakdown') {
+      const bd = App.breakdownChoices(targetChar, selectedShengmu, selectedYunmu);
+      return { ...base, prompt: 'breakdown', breakdown: bd };
+    }
+    return null;
+  }
+
   App.buildCandidates = buildCandidates;
   App.generate = generate;
+  App.generateComplex = generateComplex;
 })(window.App);
