@@ -329,8 +329,18 @@
         );
 
     const submitDisabled = !allSlotsPicked(bd, isZhengti);
+
+    // 实时拼读回显
+    const assembly = previewAssembly(attempt.picks, q);
+    const assemblyText  = assembly || '_ _ _';
+    const assemblyClass = assembly ? 'bd-assembly-result' : 'bd-assembly-result empty';
+
     choicesEl.innerHTML = `
       <div class="bd-slots">${slotsHtml}</div>
+      <div class="bd-assembly">
+        <span class="bd-assembly-label">你的拼读：</span>
+        <span class="${assemblyClass}">${assemblyText}</span>
+      </div>
       <button class="big-btn primary submit-btn"
               data-action="submit-breakdown"
               ${submitDisabled ? 'disabled' : ''}>
@@ -384,6 +394,32 @@
   function allSlotsPicked(bd, isZhengti) {
     if (isZhengti) return attempt.picks.tone != null;
     return attempt.picks.shengmu != null && attempt.picks.yunmu != null && attempt.picks.tone != null;
+  }
+
+  // 把孩子当前的选择实时拼起来显示。规则详见 v2.2 计划。
+  function previewAssembly(picks, q) {
+    // 整体认读音节：直接对 base 应用声调
+    if (q && q.breakdown && q.breakdown.special === 'zhengti-only-tone') {
+      if (!picks.tone) return null;
+      return App.addTone(q.target.base, picks.tone);
+    }
+
+    // 将"（无）"占位转空串
+    let sm = (picks.shengmu === '（无）' || !picks.shengmu) ? '' : picks.shengmu;
+    let ym = (picks.yunmu   === '（无）' || !picks.yunmu)   ? '' : picks.yunmu;
+    const tone = picks.tone;
+
+    if (!sm && !ym) return null;
+
+    // jqxy + ü → u 规则（仅在两者都有时才应用）
+    let effectiveYm = ym;
+    if (sm && ym) effectiveYm = App.applyUmlautRule(sm, ym);
+
+    const base = sm + effectiveYm;
+    if (tone && /[aeiouü]/.test(base)) {
+      return App.addTone(base, tone);
+    }
+    return base;
   }
 
   function handleBreakdownTileClick(q, tile) {

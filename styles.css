@@ -734,6 +734,43 @@ h3 { font-size: 22px; margin: 0 0 12px; }
   color: #fff;
 }
 
+/* 实时拼读回显 */
+.bd-assembly {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin: 14px auto 0;
+  padding: 12px 24px;
+  background: #fff8e1;
+  border: 3px dashed #ffce5e;
+  border-radius: 20px;
+  max-width: 720px;
+  animation: popIn .3s ease;
+}
+.bd-assembly-label {
+  font-size: 20px;
+  color: #8a6512;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.bd-assembly-result {
+  font-size: 56px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: var(--primary-dark);
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  line-height: 1;
+  min-width: 100px;
+  text-align: center;
+}
+.bd-assembly-result.empty {
+  color: #c8b89a;
+  font-size: 36px;
+  letter-spacing: 10px;
+  font-weight: 600;
+}
+
 /* 提交按钮 */
 .submit-btn {
   display: block;
@@ -769,6 +806,10 @@ h3 { font-size: 22px; margin: 0 0 12px; }
   .bd-tile { min-height: 56px; font-size: 22px; }
   .bd-tile .opt-tone-mark { font-size: 26px; }
   .bd-tile .opt-tone-num  { font-size: 13px; }
+  .bd-assembly { padding: 10px 16px; gap: 8px; }
+  .bd-assembly-label { font-size: 16px; }
+  .bd-assembly-result { font-size: 44px; min-width: 80px; }
+  .bd-assembly-result.empty { font-size: 28px; letter-spacing: 6px; }
 }
 
 /* ---- 小屏 ---- */
