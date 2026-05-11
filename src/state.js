@@ -12,7 +12,9 @@ window.App = window.App || {};
         selectedYunmu: [],
         selectedZhengti: [],
         questionsPerSet: 10,
-        soundEnabled: true
+        soundEnabled: true,
+        // v2 综合练习启用的题型
+        enabledComplexTypes: ['char2pinyin', 'pinyin2char', 'breakdown']
       },
       history: {}
     };
@@ -51,7 +53,8 @@ window.App = window.App || {};
 
   // question: { pinyin, base, tone, shengmu, yunmu, kind }
   // result: '会' | '不熟' | '不会'
-  function recordAnswer(question, result) {
+  // mode: 'parent' (v1.0 看拼音读) | 'complex' (v2 综合练习) — 默认 parent
+  function recordAnswer(question, result, mode) {
     const data = readAll();
     const key = question.pinyin;
     const entry = data.history[key] || {
@@ -62,11 +65,15 @@ window.App = window.App || {};
       yunmu: question.yunmu,
       kind: question.kind,
       results: [],
+      modes: [],
       updatedAt: 0
     };
+    if (!entry.modes) entry.modes = [];
     entry.results.push(result);
+    entry.modes.push(mode || 'parent');
     if (entry.results.length > MAX_HISTORY_PER_SYLLABLE) {
       entry.results = entry.results.slice(-MAX_HISTORY_PER_SYLLABLE);
+      entry.modes   = entry.modes.slice(-MAX_HISTORY_PER_SYLLABLE);
     }
     entry.updatedAt = Date.now();
     data.history[key] = entry;

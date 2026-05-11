@@ -41,7 +41,8 @@
       <h2>欢迎，小朋友！</h2>
       <p class="hint">点击下面的大按钮开始今天的拼音练习吧。</p>
       <div class="big-buttons">
-        <button class="big-btn primary" data-action="start">🎯 开始练习</button>
+        <button class="big-btn primary" data-action="start-parent">📖 看拼音读 · 家长判定</button>
+        <button class="big-btn primary alt" data-action="start-complex">🎯 综合练习 · 软件判分</button>
         <button class="big-btn" data-nav="settings">📝 设置已学元素</button>
         <button class="big-btn" data-nav="history">📊 查看历史</button>
       </div>
@@ -125,6 +126,29 @@
     </section>
   </template>
 
+  <template id="view-practice-complex">
+    <section class="view view-practice-complex">
+      <div class="practice-top">
+        <div class="star-progress" id="star-progress"></div>
+        <div class="streak-badge" id="streak-badge"></div>
+      </div>
+
+      <!-- 题目展示区：根据 type 切换内容 -->
+      <div class="card complex-card">
+        <div class="prompt-area" id="prompt-area"></div>
+        <div class="step-hint" id="step-hint"></div>
+      </div>
+
+      <!-- 选项区：4 个大格子 -->
+      <div class="choices" id="choices"></div>
+
+      <div class="practice-bottom">
+        <div class="mascot-host practice-mascot"></div>
+        <button class="link-btn" data-nav="home">退出本组练习</button>
+      </div>
+    </section>
+  </template>
+
   <template id="view-report">
     <section class="view view-report">
       <h2>✨ 这一组完成啦！</h2>
@@ -194,10 +218,12 @@
     </section>
   </template>
 
-  <!-- 加载顺序：data → state → stats → generator → mascot/sounds/streak/celebrate → app -->
+  <!-- 加载顺序：data → state → stats → chars/distractors → generator → mascot/sounds/streak/celebrate → app -->
   <script src="src/data.js"></script>
   <script src="src/state.js"></script>
   <script src="src/stats.js"></script>
+  <script src="src/chars.js"></script>
+  <script src="src/distractors.js"></script>
   <script src="src/generator.js"></script>
   <script src="src/mascot.js"></script>
   <script src="src/sounds.js"></script>
