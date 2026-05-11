@@ -166,8 +166,15 @@
     mountPracticeMascot();
 
     if (q.type === 'breakdown') {
-      attempt = { stepIndex: 0, wrongPerStep: [false, false, false], stepLocked: false };
-      renderBreakdownStep(q);
+      attempt = {
+        kind: 'breakdown-parallel',
+        picks: { shengmu: null, yunmu: null, tone: null },
+        attemptCount: 0,
+        locked: { shengmu: false, yunmu: false, tone: false },
+        results: { shengmu: null, yunmu: null, tone: null }, // 'correct' | 'wrong' | null
+        finalized: false
+      };
+      renderBreakdownParallel(q);
     } else {
       attempt = { wrongOnce: false, locked: false };
       renderChoiceQuestion(q);
@@ -291,132 +298,182 @@
     setTimeout(advance, result === '会' ? 700 : 1200);
   }
 
-  // 渲染题型 ③（拆分拼读，3 步走）
-  function renderBreakdownStep(q) {
+  // ============================================================
+  // 题型 ③ 拆分拼读：并行版（在同一界面同时选声母 / 韵母 / 声调）
+  // ============================================================
+  function renderBreakdownParallel(q) {
     const prompt = $('#prompt-area');
     const stepHint = $('#step-hint');
     const choicesEl = $('#choices');
 
-    // 顶部 prompt：始终显示字
+    // 顶部 prompt：始终显示字 + emoji
     const emojiHtml = q.target.emoji ? `<span class="prompt-emoji">${q.target.emoji}</span>` : '';
     prompt.innerHTML = `<span class="prompt-char">${q.target.char}</span>${emojiHtml}`;
 
     const bd = q.breakdown;
+    const isZhengti = bd.special === 'zhengti-only-tone';
 
-    // 整体认读音节只有声调一步
-    if (bd.special === 'zhengti-only-tone') {
-      attempt.stepIndex = 2;
-      stepHint.textContent = '选这个字的声调';
-      renderToneOptions(q, bd.toneStep);
-      return;
+    // 选好后的提示文案
+    if (attempt.attemptCount === 0) {
+      stepHint.textContent = isZhengti ? '选出这个字的声调，然后提交' : '选出声母、韵母、声调，全部选完后提交';
+    } else if (attempt.attemptCount === 1) {
+      stepHint.textContent = '标红的需要重新选哦～';
     }
 
-    if (attempt.stepIndex === 0) {
-      stepHint.textContent = '第 1 步：选声母';
-      renderSimpleOptions(q, bd.shengmuStep, 'shengmu');
-    } else if (attempt.stepIndex === 1) {
-      stepHint.textContent = '第 2 步：选韵母';
-      renderSimpleOptions(q, bd.yunmuStep, 'yunmu');
-    } else {
-      stepHint.textContent = '第 3 步：选声调';
-      renderToneOptions(q, bd.toneStep);
-    }
-    attempt.stepLocked = false;
-  }
+    const slotsHtml = isZhengti
+      ? buildSlotHtml('tone', '声调', bd.toneStep.options, q)
+      : (
+          buildSlotHtml('shengmu', '声母', bd.shengmuStep.options, q) +
+          buildSlotHtml('yunmu',   '韵母', bd.yunmuStep.options,   q) +
+          buildSlotHtml('tone',    '声调', bd.toneStep.options,    q)
+        );
 
-  function renderSimpleOptions(q, step, dimension) {
-    const choicesEl = $('#choices');
-    choicesEl.innerHTML = '';
-    step.options.forEach(val => {
-      const btn = document.createElement('button');
-      btn.className = 'choice';
-      btn.dataset.value = val;
-      btn.innerHTML = `<span class="opt-text">${val}</span>`;
-      btn.addEventListener('click', () => handleBreakdownClick(q, step, val, btn, dimension));
-      choicesEl.appendChild(btn);
+    const submitDisabled = !allSlotsPicked(bd, isZhengti);
+    choicesEl.innerHTML = `
+      <div class="bd-slots">${slotsHtml}</div>
+      <button class="big-btn primary submit-btn"
+              data-action="submit-breakdown"
+              ${submitDisabled ? 'disabled' : ''}>
+        提交答案
+      </button>
+    `;
+
+    // 给每个 tile 挂点击
+    $all('.bd-tile').forEach(tile => {
+      tile.addEventListener('click', () => handleBreakdownTileClick(q, tile));
     });
   }
 
-  function renderToneOptions(q, step) {
-    const choicesEl = $('#choices');
-    choicesEl.innerHTML = '';
-    const marks = { 1: 'ˉ', 2: 'ˊ', 3: 'ˇ', 4: 'ˋ' };
-    step.options.forEach(val => {
-      const btn = document.createElement('button');
-      btn.className = 'choice';
-      btn.dataset.value = String(val);
-      // 用 base 字母示意，例如对"māo"，1声示意为 ā，2声 á 等
-      const sample = makeTonePreview(q.target, val);
-      btn.innerHTML = `<span class="opt-tone-mark">${sample}</span><span class="opt-tone-num">${val} 声</span>`;
-      btn.addEventListener('click', () => handleBreakdownClick(q, step, val, btn, 'tone'));
-      choicesEl.appendChild(btn);
-    });
-  }
+  function buildSlotHtml(slotName, label, options, q) {
+    const picked = attempt.picks[slotName];
+    const locked = attempt.locked[slotName];
+    const slotResult = attempt.results[slotName]; // 'correct' | 'wrong' | null
+    const slotCls = ['bd-slot'];
+    if (locked) slotCls.push('locked');
+    if (slotResult === 'correct') slotCls.push('result-correct');
+    if (slotResult === 'wrong') slotCls.push('result-wrong');
 
-  function makeTonePreview(target, toneNumber) {
-    // 用该字 base 应用该声调，预览给孩子看
-    const sample = App.addTone(target.base, toneNumber);
-    return sample;
-  }
+    const tiles = options.map(opt => {
+      const val = String(opt);
+      const sel = String(picked) === val;
+      const tileCls = ['bd-tile'];
+      if (sel) tileCls.push('selected');
+      // 第二次重试时，已 locked-correct 的格子不允许再点
+      if (locked) tileCls.push('frozen');
 
-  function handleBreakdownClick(q, step, val, btn, dimension) {
-    if (!attempt || attempt.stepLocked) return;
-
-    const isCorrect = String(val) === String(step.correct);
-
-    if (isCorrect) {
-      btn.classList.add('correct');
-      attempt.stepLocked = true;
-      // 进入下一步或结束题目
-      setTimeout(() => goNextBreakdownStep(q), 500);
-    } else {
-      btn.classList.add('wrong', 'disabled');
-      attempt.wrongPerStep[attempt.stepIndex] = true;
-      // 拆分模式：每步只允许试 2 次（首次错→标红允许重选；第二次错→高亮正确并进入下一步）
-      const stepKey = '_secondTry_' + attempt.stepIndex;
-      if (attempt[stepKey]) {
-        // 已是第二次错
-        attempt.stepLocked = true;
-        highlightBreakdownCorrect(step);
-        setTimeout(() => goNextBreakdownStep(q), 1200);
+      let inner;
+      if (slotName === 'tone') {
+        // 只显示四个声调符号本身，不带任何元音字母（避免暴露答案 + 避免孩子以为四声只能配某个字）
+        const TONE_GLYPHS = { 1: 'ˉ', 2: 'ˊ', 3: 'ˇ', 4: 'ˋ' };
+        const sample = TONE_GLYPHS[parseInt(val, 10)] || '';
+        inner = `<span class="opt-tone-mark">${sample}</span><span class="opt-tone-num">${val} 声</span>`;
       } else {
-        attempt[stepKey] = true;
+        inner = `<span class="opt-text">${val}</span>`;
       }
+      return `<button class="${tileCls.join(' ')}" data-slot="${slotName}" data-value="${val}">${inner}</button>`;
+    }).join('');
+
+    return `
+      <div class="${slotCls.join(' ')}" data-slot-row="${slotName}">
+        <div class="bd-slot-label">${label}</div>
+        <div class="bd-slot-choices">${tiles}</div>
+      </div>
+    `;
+  }
+
+  function allSlotsPicked(bd, isZhengti) {
+    if (isZhengti) return attempt.picks.tone != null;
+    return attempt.picks.shengmu != null && attempt.picks.yunmu != null && attempt.picks.tone != null;
+  }
+
+  function handleBreakdownTileClick(q, tile) {
+    if (attempt.finalized) return;
+    const slot = tile.dataset.slot;
+    const value = tile.dataset.value;
+    // 锁定的 slot 不能再改
+    if (attempt.locked[slot]) return;
+
+    attempt.picks[slot] = (slot === 'tone') ? parseInt(value, 10) : value;
+    // 重置该 slot 的红色结果（用户已经在改正）
+    if (attempt.results[slot] === 'wrong') attempt.results[slot] = null;
+
+    renderBreakdownParallel(q);
+  }
+
+  function handleBreakdownSubmit(q) {
+    if (attempt.finalized) return;
+    const bd = q.breakdown;
+    const isZhengti = bd.special === 'zhengti-only-tone';
+    if (!allSlotsPicked(bd, isZhengti)) return;
+
+    attempt.attemptCount += 1;
+
+    // 比对每个 slot
+    const shengmuOK = isZhengti ? true : attempt.picks.shengmu === bd.shengmuStep.correct;
+    const yunmuOK   = isZhengti ? true : attempt.picks.yunmu   === bd.yunmuStep.correct;
+    const toneOK    = String(attempt.picks.tone) === String(bd.toneStep.correct);
+
+    if (!isZhengti) {
+      attempt.results.shengmu = shengmuOK ? 'correct' : 'wrong';
+      attempt.results.yunmu   = yunmuOK   ? 'correct' : 'wrong';
     }
-  }
+    attempt.results.tone = toneOK ? 'correct' : 'wrong';
 
-  function highlightBreakdownCorrect(step) {
-    $all('#choices .choice').forEach(btn => {
-      if (btn.dataset.value === String(step.correct)) btn.classList.add('correct');
-      else btn.classList.add('disabled');
-    });
-  }
+    // 答对的 slot 锁定，下次重试不让改
+    if (shengmuOK) attempt.locked.shengmu = true;
+    if (yunmuOK)   attempt.locked.yunmu   = true;
+    if (toneOK)    attempt.locked.tone    = true;
 
-  function goNextBreakdownStep(q) {
-    if (attempt.stepIndex < 2) {
-      attempt.stepIndex++;
-      renderBreakdownStep(q);
+    const allCorrect = shengmuOK && yunmuOK && toneOK;
+
+    if (allCorrect && attempt.attemptCount === 1) {
+      finalizeBreakdown(q, '会');
+    } else if (allCorrect && attempt.attemptCount >= 2) {
+      finalizeBreakdown(q, '不熟');
+    } else if (attempt.attemptCount === 1) {
+      // 第一次有错：允许重试，重新渲染显示哪些对哪些错
+      renderBreakdownParallel(q);
     } else {
-      // 整道题完成：按"任意一步错过"算不熟，"全对"算会，"两步以上错"算不会
-      const wrongs = attempt.wrongPerStep.filter(Boolean).length;
-      const result = wrongs === 0 ? '会' : (wrongs <= 1 ? '不熟' : '不会');
-
-      App.recordAnswer(q, result, 'complex');
-      session.answers.push({ question: q, result });
-
-      if (App.Streak) App.Streak.onAnswer(result);
-      if (App.Celebrate) {
-        if (result === '会') {
-          App.Celebrate.smallCorrect();
-          if (App.Streak && App.Streak.isMilestone()) {
-            App.Celebrate.streakLevelUp(App.Streak.level(), App.Streak.get().current);
-          }
-        } else {
-          App.Celebrate.gentle(result);
-        }
-      }
-      setTimeout(advance, 700);
+      // 第二次还有错：高亮所有正确答案，记 不会
+      revealAllCorrect(q);
+      finalizeBreakdown(q, '不会');
     }
+  }
+
+  function revealAllCorrect(q) {
+    const bd = q.breakdown;
+    const isZhengti = bd.special === 'zhengti-only-tone';
+    if (!isZhengti) {
+      attempt.picks.shengmu = bd.shengmuStep.correct;
+      attempt.picks.yunmu   = bd.yunmuStep.correct;
+    }
+    attempt.picks.tone = bd.toneStep.correct;
+    attempt.results.shengmu = 'correct';
+    attempt.results.yunmu = 'correct';
+    attempt.results.tone = 'correct';
+    attempt.locked.shengmu = true;
+    attempt.locked.yunmu = true;
+    attempt.locked.tone = true;
+    renderBreakdownParallel(q);
+  }
+
+  function finalizeBreakdown(q, result) {
+    attempt.finalized = true;
+    App.recordAnswer(q, result, 'complex');
+    session.answers.push({ question: q, result });
+
+    if (App.Streak) App.Streak.onAnswer(result);
+    if (App.Celebrate) {
+      if (result === '会') {
+        App.Celebrate.smallCorrect();
+        if (App.Streak && App.Streak.isMilestone()) {
+          App.Celebrate.streakLevelUp(App.Streak.level(), App.Streak.get().current);
+        }
+      } else {
+        App.Celebrate.gentle(result);
+      }
+    }
+    setTimeout(advance, result === '不会' ? 1500 : 800);
   }
 
   // 推进到下一题或结束本组
@@ -539,6 +596,12 @@
     else if (action === 'speak') {
       const txt = $('#pinyin-display');
       if (txt) speakPinyin(txt.textContent);
+    }
+    else if (action === 'submit-breakdown') {
+      if (session && session.mode === 'complex') {
+        const q = session.questions[session.index];
+        if (q && q.type === 'breakdown') handleBreakdownSubmit(q);
+      }
     }
     else if (action === 'toggle-sound') toggleSound();
     else if (action === 'clear-history') {
